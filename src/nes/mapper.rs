@@ -105,7 +105,7 @@ pub fn create_mapper(cart: Cartridge) -> Result<Box<dyn Mapper>> {
         id if id <= DOCUMENTED_MAPPER_MAX_ID => Box::new(GenericMapper::new(cart)),
         id => {
             bail!(
-                "mapper {id} is not in documented set 0..={} (implemented: 0, 1, 2, 3, 4, 5, 7, 9, 10, 19, 66, 69, 71)",
+                "mapper {id} exceeds max supported ({}). Try increasing DOCUMENTED_MAPPER_MAX_ID",
                 DOCUMENTED_MAPPER_MAX_ID
             );
         }
