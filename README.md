@@ -54,7 +54,7 @@ cargo run
 - B: `X`
 - Start: `Enter`
 - Select: `Shift`
-- Pause/Run: `Space`
+- Pause/Run: `P`
 - Reset: `R`
 - Open ROM: `Ctrl+O`
 - Zapper aim: mouse cursor over game image
@@ -76,6 +76,30 @@ cargo run
 ## Notes
 
 This build prioritizes accuracy over speed (v5 profile). True 100% compatibility still requires full APU emulation and additional mapper edge-case coverage.
+
+## Stress + Accuracy Runs
+
+Build the AccuracyCoin ROM from source:
+
+```powershell
+Set-Location external/AccuracyCoinRef
+.\nesasm.exe AccuracyCoin.asm
+Set-Location ..\..
+```
+
+Run a 500-iteration emulator stress test:
+
+```powershell
+cargo run --release --bin stress_runner -- --rom external/AccuracyCoinRef/AccuracyCoin.nes --iterations 500 --frames 1800
+```
+
+Run extended AccuracyCoin probe passes:
+
+```powershell
+cargo run --release --bin accuracycoin_probe -- --rom external/AccuracyCoinRef/AccuracyCoin.nes --frames 4800
+cargo run --release --bin accuracycoin_probe -- --rom external/AccuracyCoinRef/AccuracyCoin.nes --frames 7200 --hold-input-frames 120 --input start
+cargo run --release --bin accuracycoin_probe -- --rom external/AccuracyCoinRef/AccuracyCoin.nes --frames 7200 --hold-input-frames 180 --input down,buttona
+```
 
 ## Hardware References Used
 
