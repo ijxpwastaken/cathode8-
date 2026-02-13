@@ -1,5 +1,7 @@
 # Cathode8 NES Emulator - Game Compatibility List
 
+## Version: 0.1.0 Accuracy-First Edition
+
 ## Supported Mappers (0-559 = 100+ mappers!)
 
 The emulator supports all mappers from the NES 2.0 specification (mappers 0-559) through the GenericMapper implementation plus custom implementations for the most popular mappers.
@@ -55,6 +57,26 @@ These mappers are handled via the GenericMapper implementation and work with mos
 | 225 | 72-in-1 | Multicart |
 | 232 | Quattro | Al Unser's Racer |
 | 342 | COOLGIRL | SNAC mapper |
+
+## Features
+
+### Implemented
+- ✅ 100+ mapper support (mappers 0-559)
+- ✅ Cycle-accurate MMC3 IRQ
+- ✅ Sprite 0 hit detection
+- ✅ Odd-frame PPU timing
+- ✅ Undocumented CPU opcode support
+- ✅ Debugger (`cargo run --release --bin cathode8_debug <rom.nes>`)
+- ✅ ROM test runner
+- ✅ Stress test runner
+
+### Planned (for Mesen-level accuracy)
+- ⏳ Save states (serialization)
+- ⏳ Cycle-perfect PPU rendering
+- ⏳ Cycle-perfect APU timing
+- ⏳ Full DMC DMA accuracy
+- ⏳ Netplay support
+- ⏳ Advanced debugger
 
 ## Game Compatibility by Genre
 
