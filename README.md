@@ -1,4 +1,5 @@
 # Cathode-8 (v5 accuracy core)
+![Code Quality](https://img.shields.io)
 
 A from-scratch NES emulator written in Rust with a native desktop UI.
 
