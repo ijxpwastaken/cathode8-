@@ -6,7 +6,8 @@ fn main() -> anyhow::Result<()> {
             .with_inner_size([1024.0, 720.0])
             .with_min_inner_size([640.0, 480.0])
             .with_title("Cathode-8"),
-        vsync: true,
+        // Lower end-to-end latency for reaction-heavy games like Punch-Out.
+        vsync: false,
         ..Default::default()
     };
 

@@ -686,6 +686,8 @@ dependencies = [
  "eframe",
  "quick-xml 0.38.4",
  "rfd",
+ "serde",
+ "serde_json",
  "sha1",
 ]
 

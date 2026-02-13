@@ -242,12 +242,12 @@ fn parse_suite_xml(path: &Path) -> Result<Vec<SuiteTest>> {
                     reading_tvsha1 = false;
                 } else if name.as_ref() == b"recordedinput" {
                     reading_recorded = false;
-                } else if name.as_ref() == b"test" {
-                    if let Some(mut test) = current.take() {
-                        test.tvsha1 = test.tvsha1.trim().to_string();
-                        test.recordedinput = test.recordedinput.trim().to_string();
-                        tests.push(test);
-                    }
+                } else if name.as_ref() == b"test"
+                    && let Some(mut test) = current.take()
+                {
+                    test.tvsha1 = test.tvsha1.trim().to_string();
+                    test.recordedinput = test.recordedinput.trim().to_string();
+                    tests.push(test);
                 }
             }
             Ok(Event::Eof) => break,

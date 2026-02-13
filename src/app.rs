@@ -12,8 +12,6 @@ use crate::nes::{
 const NTSC_FRAME_RATE_HZ: f64 = 60.098_813_897_440_515;
 const HIGH_REFRESH_RATE_HZ: f64 = 240.0;
 const MAX_FRAMES_PER_UPDATE: u32 = 2;
-const AUDIO_TARGET_BUFFER_MS: usize = 8;
-const AUDIO_MAX_BUFFER_MS: usize = 16;
 
 pub struct NesApp {
     nes: Nes,
@@ -25,6 +23,13 @@ pub struct NesApp {
     frame_interval: Duration,
     high_refresh_interval: Duration,
     next_frame_at: Option<Instant>,
+    paused: bool,
+    latched_controller_state: u8,
+    controller_hold_until: Option<Instant>,
+    update_dt_ema: Option<f64>,
+    estimated_refresh_hz: f64,
+    audio_target_buffer_ms: usize,
+    audio_max_buffer_ms: usize,
 }
 
 impl NesApp {
@@ -49,6 +54,13 @@ impl NesApp {
             frame_interval: Duration::from_secs_f64(1.0 / NTSC_FRAME_RATE_HZ),
             high_refresh_interval: Duration::from_secs_f64(1.0 / HIGH_REFRESH_RATE_HZ),
             next_frame_at: None,
+            paused: false,
+            latched_controller_state: 0,
+            controller_hold_until: None,
+            update_dt_ema: None,
+            estimated_refresh_hz: 60.0,
+            audio_target_buffer_ms: 7,
+            audio_max_buffer_ms: 10,
         }
     }
 
@@ -111,6 +123,14 @@ impl NesApp {
             self.next_frame_at = None;
             self.status_line = "Reset complete".to_string();
         }
+
+        let pause_toggle = ctx.input(|i| i.key_pressed(Key::P));
+        if pause_toggle && self.nes.has_rom() {
+            self.paused = !self.paused;
+            if !self.paused {
+                self.controller_hold_until = Some(Instant::now() + Duration::from_secs(5));
+            }
+        }
     }
 
     fn controller_state_from_input(ctx: &egui::Context) -> u8 {
@@ -165,17 +185,19 @@ impl NesApp {
         let trigger = ctx.input(|input| input.pointer.primary_down());
         let pointer = ctx.input(|input| input.pointer.hover_pos());
 
-        if let (Some(rect), Some(pos)) = (self.last_screen_rect, pointer) {
-            if rect.contains(pos) && rect.width() > 0.0 && rect.height() > 0.0 {
-                let nx = ((pos.x - rect.left()) / rect.width() * 256.0)
-                    .floor()
-                    .clamp(0.0, 255.0) as i16;
-                let ny = ((pos.y - rect.top()) / rect.height() * 240.0)
-                    .floor()
-                    .clamp(0.0, 239.0) as i16;
-                self.nes.set_zapper_state(nx, ny, trigger);
-                return;
-            }
+        if let (Some(rect), Some(pos)) = (self.last_screen_rect, pointer)
+            && rect.contains(pos)
+            && rect.width() > 0.0
+            && rect.height() > 0.0
+        {
+            let nx = ((pos.x - rect.left()) / rect.width() * 256.0)
+                .floor()
+                .clamp(0.0, 255.0) as i16;
+            let ny = ((pos.y - rect.top()) / rect.height() * 240.0)
+                .floor()
+                .clamp(0.0, 239.0) as i16;
+            self.nes.set_zapper_state(nx, ny, trigger);
+            return;
         }
 
         self.nes.set_zapper_state(-1, -1, trigger);
@@ -208,6 +230,46 @@ impl NesApp {
             0
         }
     }
+
+    fn update_refresh_estimate_and_latency(&mut self, now: Instant) {
+        if let Some(prev) = self.next_frame_at {
+            let dt = now.saturating_duration_since(prev).as_secs_f64();
+            if (0.0005..=0.1).contains(&dt) {
+                let ema = self.update_dt_ema.unwrap_or(dt);
+                let next_ema = ema * 0.9 + dt * 0.1;
+                self.update_dt_ema = Some(next_ema);
+                let hz = (1.0 / next_ema).clamp(30.0, 360.0);
+                self.estimated_refresh_hz = hz;
+            }
+        }
+
+        let (target_ms, max_ms, poll_hz) = if self.estimated_refresh_hz >= 170.0 {
+            (4, 7, 1000.0)
+        } else if self.estimated_refresh_hz >= 110.0 {
+            (5, 8, 600.0)
+        } else if self.estimated_refresh_hz >= 80.0 {
+            (6, 9, 360.0)
+        } else {
+            (7, 10, 240.0)
+        };
+
+        self.audio_target_buffer_ms = target_ms;
+        self.audio_max_buffer_ms = max_ms;
+        self.high_refresh_interval = Duration::from_secs_f64(1.0 / poll_hz);
+    }
+
+    fn effective_controller_state(&mut self, ctx: &egui::Context, now: Instant) -> u8 {
+        if let Some(until) = self.controller_hold_until {
+            if now < until {
+                return self.latched_controller_state;
+            }
+            self.controller_hold_until = None;
+        }
+
+        let live = Self::controller_state_from_input(ctx);
+        self.latched_controller_state = live;
+        live
+    }
 }
 
 impl eframe::App for NesApp {
@@ -216,8 +278,10 @@ impl eframe::App for NesApp {
         self.handle_shortcuts(ctx);
         self.update_zapper(ctx);
 
-        if self.nes.has_rom() {
-            let now = Instant::now();
+        let now = Instant::now();
+        self.update_refresh_estimate_and_latency(now);
+
+        if self.nes.has_rom() && !self.paused {
             let mut next = self.next_frame_at.unwrap_or(now);
             let mut ran_frames = 0u32;
 
@@ -226,30 +290,20 @@ impl eframe::App for NesApp {
                 .as_ref()
                 .map(|audio| audio.sample_rate() as usize);
             if let Some(sample_rate) = sample_rate {
-                let target_samples = sample_rate * AUDIO_TARGET_BUFFER_MS / 1000;
-                let max_samples = sample_rate * AUDIO_MAX_BUFFER_MS / 1000;
-
-                while self.queued_audio_samples() < target_samples
-                    && ran_frames < MAX_FRAMES_PER_UPDATE
-                {
-                    let state = Self::controller_state_from_input(ctx);
-                    self.run_frame_with_audio(state);
-                    ran_frames += 1;
-                    next += self.frame_interval;
-                }
+                let max_samples = sample_rate * self.audio_max_buffer_ms / 1000;
 
                 while Instant::now() >= next
                     && self.queued_audio_samples() < max_samples
                     && ran_frames < MAX_FRAMES_PER_UPDATE
                 {
-                    let state = Self::controller_state_from_input(ctx);
+                    let state = self.effective_controller_state(ctx, now);
                     self.run_frame_with_audio(state);
                     ran_frames += 1;
                     next += self.frame_interval;
                 }
             } else {
                 while Instant::now() >= next && ran_frames < MAX_FRAMES_PER_UPDATE {
-                    let state = Self::controller_state_from_input(ctx);
+                    let state = self.effective_controller_state(ctx, now);
                     self.nes.set_controller_state(state);
                     self.nes.run_frame();
                     let _ = self.nes.take_audio_samples();
@@ -258,11 +312,14 @@ impl eframe::App for NesApp {
                 }
             }
 
-            if ran_frames == 0 && now + self.frame_interval < next {
-                next = now + self.frame_interval;
+            if ran_frames == 0 && now > next + self.frame_interval {
+                next = now;
             }
 
             self.next_frame_at = Some(next);
+        } else if self.paused {
+            let state = self.effective_controller_state(ctx, now);
+            self.nes.set_controller_state(state);
         }
 
         self.update_texture(ctx);
@@ -283,6 +340,23 @@ impl eframe::App for NesApp {
                     self.status_line = "Reset complete".to_string();
                 }
 
+                if ui
+                    .add_enabled(
+                        self.nes.has_rom(),
+                        egui::Button::new(if self.paused {
+                            "Resume (P)"
+                        } else {
+                            "Pause (P)"
+                        }),
+                    )
+                    .clicked()
+                {
+                    self.paused = !self.paused;
+                    if !self.paused {
+                        self.controller_hold_until = Some(Instant::now() + Duration::from_secs(5));
+                    }
+                }
+
                 if let Some(path) = &self.loaded_rom {
                     ui.separator();
                     ui.label(path.display().to_string());
@@ -300,18 +374,19 @@ impl eframe::App for NesApp {
                 ui.separator();
                 if let Some(audio) = &self.audio {
                     ui.label(format!(
-                        "Audio: {} Hz (queue {} ms, target {}-{} ms)",
+                        "Audio: {} Hz (queue {} ms, target {}-{} ms, display ~{:.0} Hz)",
                         audio.sample_rate(),
                         (audio.queued_samples() * 1000) / audio.sample_rate() as usize,
-                        AUDIO_TARGET_BUFFER_MS,
-                        AUDIO_MAX_BUFFER_MS
+                        self.audio_target_buffer_ms,
+                        self.audio_max_buffer_ms,
+                        self.estimated_refresh_hz
                     ));
                 } else {
                     ui.label("Audio: unavailable");
                 }
                 ui.separator();
                 ui.label(
-                    "Controls: WASD move, Space/Z jump (A), X=B, Enter=Start, Shift=Select, Mouse=Zapper",
+                    "Controls: WASD move, Space/Z jump (A), X=B, Enter=Start, Shift=Select, P=Pause, Mouse=Zapper",
                 );
             });
 

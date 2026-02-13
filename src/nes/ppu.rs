@@ -71,6 +71,7 @@ pub struct PpuDebugCounters {
     pub last_write_addr: u16,
 }
 
+#[derive(Clone)]
 pub struct Ppu {
     ctrl: u8,
     mask: u8,
@@ -188,7 +189,15 @@ impl Ppu {
             debug: PpuDebugCounters::default(),
         }
     }
+}
 
+impl Default for Ppu {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Ppu {
     pub fn reset(&mut self) {
         self.ctrl = 0;
         self.mask = 0;

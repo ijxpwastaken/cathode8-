@@ -21,10 +21,13 @@ impl AudioOutput {
             .default_output_config()
             .context("failed to query default audio config")?;
 
-        let stream_config: cpal::StreamConfig = supported.config();
+        let mut stream_config: cpal::StreamConfig = supported.config();
         let sample_rate = stream_config.sample_rate.0;
         let channels = stream_config.channels as usize;
-        let max_queue_samples = ((sample_rate as usize) * 96) / 1000;
+        let desired_frames = ((sample_rate as usize) * 7 / 1000).max(64) as u32;
+        stream_config.buffer_size = cpal::BufferSize::Fixed(desired_frames);
+        // Small headroom to avoid crackle while keeping latency low.
+        let max_queue_samples = ((sample_rate as usize) * 14) / 1000;
         let queue = Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(
             max_queue_samples,
         )));

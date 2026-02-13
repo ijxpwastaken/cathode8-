@@ -31,9 +31,9 @@ fn parse_args() -> Result<Config> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--rom" => {
-                let value = args
-                    .next()
-                    .context("--rom requires a path, e.g. --rom external/AccuracyCoinRef/AccuracyCoin.nes")?;
+                let value = args.next().context(
+                    "--rom requires a path, e.g. --rom external/AccuracyCoinRef/AccuracyCoin.nes",
+                )?;
                 cfg.rom = PathBuf::from(value);
             }
             "--iterations" => {

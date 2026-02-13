@@ -99,6 +99,12 @@ pub struct Nes {
     debug_events: VecDeque<String>,
 }
 
+impl Default for Nes {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Nes {
     pub fn new() -> Self {
         Self {

@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
 const CPU_CLOCK_HZ: f64 = 1_789_772.727_272_727_3;
@@ -40,6 +41,7 @@ const FC_5STEP_Q3: u32 = 22_371;
 const FC_5STEP_Q4_H4: u32 = 37_281;
 const FC_5STEP_RESET: u32 = 37_282;
 
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Apu {
     pulse1: PulseChannel,
     pulse2: PulseChannel,
@@ -73,6 +75,12 @@ pub struct Apu {
 
 impl Apu {
     pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Default for Apu {
+    fn default() -> Self {
         let mut apu = Self {
             pulse1: PulseChannel::new(true),
             pulse2: PulseChannel::new(false),
@@ -103,7 +111,9 @@ impl Apu {
         apu.update_filter_coeffs();
         apu
     }
+}
 
+impl Apu {
     pub fn reset(&mut self) {
         self.pulse1 = PulseChannel::new(true);
         self.pulse2 = PulseChannel::new(false);
@@ -419,7 +429,7 @@ fn low_pass_alpha(cutoff_hz: f32, dt: f32) -> f32 {
     dt / (rc + dt)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 struct PulseChannel {
     enabled: bool,
     channel1: bool,
@@ -605,7 +615,7 @@ impl PulseChannel {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 struct TriangleChannel {
     enabled: bool,
     control_flag: bool,
@@ -693,7 +703,7 @@ impl TriangleChannel {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 struct NoiseChannel {
     enabled: bool,
     length_halt: bool,
@@ -802,7 +812,7 @@ impl NoiseChannel {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 struct DmcChannel {
     enabled: bool,
     irq_enabled: bool,
