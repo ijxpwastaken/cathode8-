@@ -1,5 +1,5 @@
 # Cathode-8 (v5 accuracy core)
-![Static Badge](https://img.shields.io/badge/%F0%9F%A7%91%E2%80%8D%F0%9F%92%BB%20Code%20Quality%20A)
+
 
 
 A from-scratch NES emulator written in Rust with a native desktop UI.
