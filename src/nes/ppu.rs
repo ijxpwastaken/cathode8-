@@ -268,6 +268,10 @@ impl Ppu {
         self.status
     }
 
+    pub fn set_status(&mut self, status: u8) {
+        self.status = status;
+    }
+
     pub fn debug_scanline_cycle(&self) -> (i16, i16) {
         (self.scanline, self.cycle)
     }
@@ -1141,5 +1145,152 @@ impl Ppu {
         };
 
         mapped_table * 0x400 + offset
+    }
+
+    pub fn save_state(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        writer.write_all(&[self.ctrl, self.mask, self.status])?;
+        writer.write_all(&[self.oam_addr])?;
+        writer.write_all(&self.oam)?;
+        writer.write_all(&self.vram)?;
+        writer.write_all(&self.palette_ram)?;
+
+        let misc = (self.write_toggle as u8)
+            | ((self.ppuaddr_reload_pending as u8) << 1)
+            | ((self.ppuaddr_reload_delay) << 2);
+        writer.write_all(&[misc])?;
+
+        writer.write_all(&self.v.to_le_bytes())?;
+        writer.write_all(&self.t.to_le_bytes())?;
+        writer.write_all(&[self.fine_x, self.read_buffer, self.open_bus])?;
+
+        writer.write_all(&self.scanline.to_le_bytes())?;
+        writer.write_all(&self.cycle.to_le_bytes())?;
+        writer.write_all(&[
+            self.odd_frame as u8,
+            self.frame_complete as u8,
+            self.nmi_pending as u8,
+        ])?;
+        writer.write_all(&[self.nmi_delay, self.vblank_suppress as u8])?;
+
+        writer.write_all(&[
+            self.next_tile_id,
+            self.next_tile_attr,
+            self.next_tile_lsb,
+            self.next_tile_msb,
+        ])?;
+        writer.write_all(&self.bg_shift_pattern_lo.to_le_bytes())?;
+        writer.write_all(&self.bg_shift_pattern_hi.to_le_bytes())?;
+        writer.write_all(&self.bg_shift_attr_lo.to_le_bytes())?;
+        writer.write_all(&self.bg_shift_attr_hi.to_le_bytes())?;
+
+        writer.write_all(&(self.sprite_count as u8).to_le_bytes())?;
+        writer.write_all(&self.sprite_patterns_lo)?;
+        writer.write_all(&self.sprite_patterns_hi)?;
+        writer.write_all(&self.sprite_x)?;
+        writer.write_all(&self.sprite_attributes)?;
+        writer.write_all(&self.sprite_indices)?;
+
+        let sprite_eval: u16 = (self.sprite_eval_active as u16)
+            | ((self.sprite_eval_n as u16) << 1)
+            | ((self.sprite_eval_m as u16) << 3)
+            | ((self.sprite_eval_found as u16) << 5)
+            | ((self.sprite_eval_copy_remaining as u16) << 8)
+            | ((self.sprite_eval_bug_mode as u16) << 12);
+        writer.write_all(&sprite_eval.to_le_bytes())?;
+        writer.write_all(&self.sprite_eval_target_scanline.to_le_bytes())?;
+
+        Ok(())
+    }
+
+    pub fn load_state(&mut self, reader: &mut impl std::io::Read) -> std::io::Result<()> {
+        let mut buf = [0u8; 3];
+        reader.read_exact(&mut buf)?;
+        self.ctrl = buf[0];
+        self.mask = buf[1];
+        self.status = buf[2];
+
+        let mut oam_addr_buf = [0u8; 1];
+        reader.read_exact(&mut oam_addr_buf)?;
+        self.oam_addr = oam_addr_buf[0];
+
+        reader.read_exact(&mut self.oam)?;
+        reader.read_exact(&mut self.vram)?;
+        reader.read_exact(&mut self.palette_ram)?;
+
+        let mut misc = [0u8; 1];
+        reader.read_exact(&mut misc)?;
+        self.write_toggle = (misc[0] & 0x01) != 0;
+        self.ppuaddr_reload_pending = (misc[0] & 0x02) != 0;
+        self.ppuaddr_reload_delay = (misc[0] >> 2) & 0x3F;
+
+        let mut buf16 = [0u8; 2];
+        reader.read_exact(&mut buf16)?;
+        self.v = u16::from_le_bytes(buf16);
+        reader.read_exact(&mut buf16)?;
+        self.t = u16::from_le_bytes(buf16);
+
+        let mut buf3 = [0u8; 3];
+        reader.read_exact(&mut buf3)?;
+        self.fine_x = buf3[0];
+        self.read_buffer = buf3[1];
+        self.open_bus = buf3[2];
+
+        let mut buf_i16 = [0u8; 2];
+        reader.read_exact(&mut buf_i16)?;
+        self.scanline = i16::from_le_bytes(buf_i16);
+        reader.read_exact(&mut buf_i16)?;
+        self.cycle = i16::from_le_bytes(buf_i16);
+
+        let mut buf_bool = [0u8; 3];
+        reader.read_exact(&mut buf_bool)?;
+        self.odd_frame = buf_bool[0] != 0;
+        self.frame_complete = buf_bool[1] != 0;
+        self.nmi_pending = buf_bool[2] != 0;
+
+        let mut buf2 = [0u8; 2];
+        reader.read_exact(&mut buf2)?;
+        self.nmi_delay = buf2[0];
+        self.vblank_suppress = buf2[1] != 0;
+
+        let mut tile_buf = [0u8; 4];
+        reader.read_exact(&mut tile_buf)?;
+        self.next_tile_id = tile_buf[0];
+        self.next_tile_attr = tile_buf[1];
+        self.next_tile_lsb = tile_buf[2];
+        self.next_tile_msb = tile_buf[3];
+
+        reader.read_exact(&mut buf16)?;
+        self.bg_shift_pattern_lo = u16::from_le_bytes(buf16);
+        reader.read_exact(&mut buf16)?;
+        self.bg_shift_pattern_hi = u16::from_le_bytes(buf16);
+        reader.read_exact(&mut buf16)?;
+        self.bg_shift_attr_lo = u16::from_le_bytes(buf16);
+        reader.read_exact(&mut buf16)?;
+        self.bg_shift_attr_hi = u16::from_le_bytes(buf16);
+
+        let mut sprite_count_buf = [0u8; 1];
+        reader.read_exact(&mut sprite_count_buf)?;
+        self.sprite_count = sprite_count_buf[0] as usize;
+
+        reader.read_exact(&mut self.sprite_patterns_lo)?;
+        reader.read_exact(&mut self.sprite_patterns_hi)?;
+        reader.read_exact(&mut self.sprite_x)?;
+        reader.read_exact(&mut self.sprite_attributes)?;
+        reader.read_exact(&mut self.sprite_indices)?;
+
+        let mut sprite_eval_buf = [0u8; 2];
+        reader.read_exact(&mut sprite_eval_buf)?;
+        let sprite_eval = u16::from_le_bytes(sprite_eval_buf);
+        self.sprite_eval_active = (sprite_eval & 0x01) != 0;
+        self.sprite_eval_n = ((sprite_eval >> 1) & 0x03) as u8;
+        self.sprite_eval_m = ((sprite_eval >> 3) & 0x03) as u8;
+        self.sprite_eval_found = ((sprite_eval >> 5) & 0x07) as u8;
+        self.sprite_eval_copy_remaining = ((sprite_eval >> 8) & 0x0F) as u8;
+        self.sprite_eval_bug_mode = (sprite_eval & 0x1000) != 0;
+
+        reader.read_exact(&mut buf_i16)?;
+        self.sprite_eval_target_scanline = i16::from_le_bytes(buf_i16);
+
+        Ok(())
     }
 }

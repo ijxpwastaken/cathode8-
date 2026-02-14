@@ -5,8 +5,8 @@ pub mod mapper;
 mod palette;
 pub mod ppu;
 
-use anyhow::Result;
-use std::{collections::VecDeque, path::Path};
+use anyhow::{Result, anyhow};
+use std::{collections::VecDeque, path::Path, fs, io::{Write, Read}};
 
 use apu::Apu;
 use cartridge::Cartridge;
@@ -790,5 +790,80 @@ impl Nes {
         self.last_unknown_opcode = opcode;
         self.last_unknown_pc = pc;
         self.push_debug_event(format!("Unknown opcode ${:02X} @ ${:04X}", opcode, pc));
+    }
+
+    const SAVE_STATE_MAGIC: [u8; 4] = *b"C8ST";
+    const SAVE_STATE_VERSION: u8 = 2;
+
+    pub fn save_state(&self, path: &Path) -> Result<()> {
+        let mut file = fs::File::create(path)?;
+        file.write_all(&Self::SAVE_STATE_MAGIC)?;
+        file.write_all(&[Self::SAVE_STATE_VERSION])?;
+        
+        file.write_all(&[self.a, self.x, self.y, self.p, self.sp])?;
+        file.write_all(&self.pc.to_le_bytes())?;
+        let pending_nmi_byte = self.pending_nmi as u8;
+        let pending_irq_byte = self.pending_irq as u8;
+        let halted_byte = self.halted as u8;
+        file.write_all(&[pending_nmi_byte])?;
+        file.write_all(&[pending_irq_byte])?;
+        file.write_all(&self.dma_cycles.to_le_bytes())?;
+        file.write_all(&[halted_byte])?;
+        file.write_all(&self.total_cycles.to_le_bytes())?;
+        
+        file.write_all(&self.ram)?;
+        
+        self.ppu.save_state(&mut file)?;
+        self.apu.save_state(&mut file)?;
+        
+        Ok(())
+    }
+
+    pub fn load_state(&mut self, path: &Path) -> Result<()> {
+        let mut file = fs::File::open(path)?;
+        
+        let mut magic = [0u8; 4];
+        file.read_exact(&mut magic)?;
+        if magic != Self::SAVE_STATE_MAGIC {
+            return Err(anyhow!("Invalid save state magic"));
+        }
+        
+        let mut version = [0u8; 1];
+        file.read_exact(&mut version)?;
+        if version[0] != Self::SAVE_STATE_VERSION {
+            return Err(anyhow!("Incompatible save state version"));
+        }
+        
+        let mut buf = [0u8; 1];
+        
+        file.read_exact(&mut buf)?; self.a = buf[0];
+        file.read_exact(&mut buf)?; self.x = buf[0];
+        file.read_exact(&mut buf)?; self.y = buf[0];
+        file.read_exact(&mut buf)?; self.p = buf[0];
+        file.read_exact(&mut buf)?; self.sp = buf[0];
+        
+        let mut pc_buf = [0u8; 2];
+        file.read_exact(&mut pc_buf)?;
+        self.pc = u16::from_le_bytes(pc_buf);
+        
+        file.read_exact(&mut buf)?; self.pending_nmi = buf[0] != 0;
+        file.read_exact(&mut buf)?; self.pending_irq = buf[0] != 0;
+        
+        let mut dma_buf = [0u8; 4];
+        file.read_exact(&mut dma_buf)?;
+        self.dma_cycles = u32::from_le_bytes(dma_buf);
+        
+        file.read_exact(&mut buf)?; self.halted = buf[0] != 0;
+        
+        let mut cycles_buf = [0u8; 8];
+        file.read_exact(&mut cycles_buf)?;
+        self.total_cycles = u64::from_le_bytes(cycles_buf);
+        
+        file.read_exact(&mut self.ram)?;
+        
+        self.ppu.load_state(&mut file)?;
+        self.apu.load_state(&mut file)?;
+        
+        Ok(())
     }
 }

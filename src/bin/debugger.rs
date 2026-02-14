@@ -52,7 +52,7 @@ fn main() -> Result<()> {
     loop {
         if running {
             nes.run_frame();
-            let (nmi, irq, dma) = nes.debug_interrupt_state();
+            let (nmi, irq, _dma) = nes.debug_interrupt_state();
             if nmi || irq {
                 println!("Interrupt! NMI: {}, IRQ: {}", nmi, irq);
             }

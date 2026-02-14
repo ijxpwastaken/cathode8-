@@ -417,6 +417,67 @@ impl Apu {
         self.lp14k_prev_out += self.lp14k_a * (sample - self.lp14k_prev_out);
         self.lp14k_prev_out.clamp(-1.0, 1.0)
     }
+
+    pub fn save_state(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        writer.write_all(&self.frame_counter.to_le_bytes())?;
+        writer.write_all(&[
+            self.frame_mode_5_step as u8,
+            self.frame_irq_inhibit as u8,
+            self.frame_irq_flag as u8,
+        ])?;
+        writer.write_all(&[
+            self.frame_counter_write_pending as u8,
+            self.frame_counter_write_value,
+            self.frame_counter_write_delay,
+        ])?;
+        writer.write_all(&self.cpu_cycle.to_le_bytes())?;
+
+        let dmc_dma = self.dmc_dma_request.unwrap_or(0);
+        writer.write_all(&dmc_dma.to_le_bytes())?;
+
+        self.pulse1.save_state(writer)?;
+        self.pulse2.save_state(writer)?;
+        self.triangle.save_state(writer)?;
+        self.noise.save_state(writer)?;
+        self.dmc.save_state(writer)?;
+
+        Ok(())
+    }
+
+    pub fn load_state(&mut self, reader: &mut impl std::io::Read) -> std::io::Result<()> {
+        let mut buf32 = [0u8; 4];
+        reader.read_exact(&mut buf32)?;
+        self.frame_counter = u32::from_le_bytes(buf32);
+
+        let mut buf3 = [0u8; 3];
+        reader.read_exact(&mut buf3)?;
+        self.frame_mode_5_step = buf3[0] != 0;
+        self.frame_irq_inhibit = buf3[1] != 0;
+        self.frame_irq_flag = buf3[2] != 0;
+
+        let mut buf3b = [0u8; 3];
+        reader.read_exact(&mut buf3b)?;
+        self.frame_counter_write_pending = buf3b[0] != 0;
+        self.frame_counter_write_value = buf3b[1];
+        self.frame_counter_write_delay = buf3b[2];
+
+        let mut buf64 = [0u8; 8];
+        reader.read_exact(&mut buf64)?;
+        self.cpu_cycle = u64::from_le_bytes(buf64);
+
+        let mut dma_buf = [0u8; 2];
+        reader.read_exact(&mut dma_buf)?;
+        let dmc_dma = u16::from_le_bytes(dma_buf);
+        self.dmc_dma_request = if dmc_dma == 0 { None } else { Some(dmc_dma) };
+
+        self.pulse1.load_state(reader)?;
+        self.pulse2.load_state(reader)?;
+        self.triangle.load_state(reader)?;
+        self.noise.load_state(reader)?;
+        self.dmc.load_state(reader)?;
+
+        Ok(())
+    }
 }
 
 fn high_pass_alpha(cutoff_hz: f32, dt: f32) -> f32 {
@@ -613,6 +674,85 @@ impl PulseChannel {
             self.timer_period.wrapping_add(change)
         }
     }
+
+    pub fn save_state(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        let flags: u8 = (self.enabled as u8)
+            | ((self.channel1 as u8) << 1)
+            | ((self.duty) << 2)
+            | ((self.duty_step) << 5)
+            | ((self.length_halt as u8) << 7);
+        writer.write_all(&[flags])?;
+
+        writer.write_all(&self.timer_period.to_le_bytes())?;
+        writer.write_all(&self.timer_counter.to_le_bytes())?;
+        writer.write_all(&[self.length_counter])?;
+
+        let env: u8 =
+            self.constant_volume as u8 | ((self.volume) << 1) | ((self.envelope_period) << 5);
+        writer.write_all(&[env])?;
+        writer.write_all(&[
+            self.envelope_start as u8,
+            self.envelope_divider,
+            self.envelope_decay,
+        ])?;
+
+        let sweep: u16 = self.sweep_enabled as u16
+            | ((self.sweep_period as u16) << 1)
+            | ((self.sweep_negate as u16) << 4)
+            | ((self.sweep_shift as u16) << 5)
+            | ((self.sweep_reload as u16) << 8);
+        writer.write_all(&sweep.to_le_bytes())?;
+        writer.write_all(&[self.sweep_divider])?;
+
+        Ok(())
+    }
+
+    pub fn load_state(&mut self, reader: &mut impl std::io::Read) -> std::io::Result<()> {
+        let mut flags = [0u8; 1];
+        reader.read_exact(&mut flags)?;
+        self.enabled = (flags[0] & 0x01) != 0;
+        self.channel1 = (flags[0] & 0x02) != 0;
+        self.duty = (flags[0] >> 2) & 0x07;
+        self.duty_step = (flags[0] >> 5) & 0x07;
+        self.length_halt = (flags[0] & 0x80) != 0;
+
+        let mut buf16 = [0u8; 2];
+        reader.read_exact(&mut buf16)?;
+        self.timer_period = u16::from_le_bytes(buf16);
+        reader.read_exact(&mut buf16)?;
+        self.timer_counter = u16::from_le_bytes(buf16);
+
+        let mut len_buf = [0u8; 1];
+        reader.read_exact(&mut len_buf)?;
+        self.length_counter = len_buf[0];
+
+        let mut env_buf = [0u8; 1];
+        reader.read_exact(&mut env_buf)?;
+        self.constant_volume = (env_buf[0] & 0x01) != 0;
+        self.volume = (env_buf[0] >> 1) & 0x1F;
+        self.envelope_period = (env_buf[0] >> 5) & 0x1F;
+
+        let mut env2_buf = [0u8; 3];
+        reader.read_exact(&mut env2_buf)?;
+        self.envelope_start = env2_buf[0] != 0;
+        self.envelope_divider = env2_buf[1];
+        self.envelope_decay = env2_buf[2];
+
+        let mut sweep_buf = [0u8; 2];
+        reader.read_exact(&mut sweep_buf)?;
+        let sweep = u16::from_le_bytes(sweep_buf);
+        self.sweep_enabled = (sweep & 0x01) != 0;
+        self.sweep_period = ((sweep >> 1) & 0x07) as u8;
+        self.sweep_negate = (sweep & 0x10) != 0;
+        self.sweep_shift = ((sweep >> 5) & 0x07) as u8;
+        self.sweep_reload = (sweep & 0x100) != 0;
+
+        let mut sweep_div_buf = [0u8; 1];
+        reader.read_exact(&mut sweep_div_buf)?;
+        self.sweep_divider = sweep_div_buf[0];
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -700,6 +840,44 @@ impl TriangleChannel {
         } else {
             TRI_TABLE[self.seq_step as usize]
         }
+    }
+
+    pub fn save_state(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        let flags: u8 = (self.enabled as u8)
+            | ((self.control_flag as u8) << 1)
+            | ((self.linear_reload_flag as u8) << 2);
+        writer.write_all(&[flags])?;
+        writer.write_all(&[self.linear_reload_value, self.linear_counter])?;
+        writer.write_all(&self.timer_period.to_le_bytes())?;
+        writer.write_all(&self.timer_counter.to_le_bytes())?;
+        writer.write_all(&[self.length_counter, self.seq_step])?;
+        Ok(())
+    }
+
+    pub fn load_state(&mut self, reader: &mut impl std::io::Read) -> std::io::Result<()> {
+        let mut flags = [0u8; 1];
+        reader.read_exact(&mut flags)?;
+        self.enabled = (flags[0] & 0x01) != 0;
+        self.control_flag = (flags[0] & 0x02) != 0;
+        self.linear_reload_flag = (flags[0] & 0x04) != 0;
+
+        let mut buf2 = [0u8; 2];
+        reader.read_exact(&mut buf2)?;
+        self.linear_reload_value = buf2[0];
+        self.linear_counter = buf2[1];
+
+        let mut buf16 = [0u8; 2];
+        reader.read_exact(&mut buf16)?;
+        self.timer_period = u16::from_le_bytes(buf16);
+        reader.read_exact(&mut buf16)?;
+        self.timer_counter = u16::from_le_bytes(buf16);
+
+        let mut buf2b = [0u8; 2];
+        reader.read_exact(&mut buf2b)?;
+        self.length_counter = buf2b[0];
+        self.seq_step = buf2b[1];
+
+        Ok(())
     }
 }
 
@@ -809,6 +987,59 @@ impl NoiseChannel {
         } else {
             self.envelope_decay
         }
+    }
+
+    pub fn save_state(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        let flags: u8 = (self.enabled as u8)
+            | ((self.length_halt as u8) << 1)
+            | ((self.constant_volume as u8) << 2)
+            | ((self.mode as u8) << 3);
+        writer.write_all(&[flags])?;
+        writer.write_all(&[self.volume, self.envelope_period])?;
+        writer.write_all(&[
+            self.envelope_start as u8,
+            self.envelope_divider,
+            self.envelope_decay,
+        ])?;
+        writer.write_all(&self.timer_period.to_le_bytes())?;
+        writer.write_all(&self.timer_counter.to_le_bytes())?;
+        writer.write_all(&self.shift_register.to_le_bytes())?;
+        writer.write_all(&[self.length_counter])?;
+        Ok(())
+    }
+
+    pub fn load_state(&mut self, reader: &mut impl std::io::Read) -> std::io::Result<()> {
+        let mut flags = [0u8; 1];
+        reader.read_exact(&mut flags)?;
+        self.enabled = (flags[0] & 0x01) != 0;
+        self.length_halt = (flags[0] & 0x02) != 0;
+        self.constant_volume = (flags[0] & 0x04) != 0;
+        self.mode = (flags[0] & 0x08) != 0;
+
+        let mut buf = [0u8; 2];
+        reader.read_exact(&mut buf)?;
+        self.volume = buf[0];
+        self.envelope_period = buf[1];
+
+        let mut env_buf = [0u8; 3];
+        reader.read_exact(&mut env_buf)?;
+        self.envelope_start = env_buf[0] != 0;
+        self.envelope_divider = env_buf[1];
+        self.envelope_decay = env_buf[2];
+
+        let mut buf16 = [0u8; 2];
+        reader.read_exact(&mut buf16)?;
+        self.timer_period = u16::from_le_bytes(buf16);
+        reader.read_exact(&mut buf16)?;
+        self.timer_counter = u16::from_le_bytes(buf16);
+        reader.read_exact(&mut buf16)?;
+        self.shift_register = u16::from_le_bytes(buf16);
+
+        let mut len_buf = [0u8; 1];
+        reader.read_exact(&mut len_buf)?;
+        self.length_counter = len_buf[0];
+
+        Ok(())
     }
 }
 
@@ -986,5 +1217,91 @@ impl DmcChannel {
 
     fn output(&self) -> u8 {
         self.output_level
+    }
+
+    pub fn save_state(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        let flags: u8 = (self.enabled as u8)
+            | ((self.irq_enabled as u8) << 1)
+            | ((self.irq_flag as u8) << 2)
+            | ((self.loop_flag as u8) << 3);
+        writer.write_all(&[flags])?;
+        writer.write_all(&[self.rate_index])?;
+        writer.write_all(&self.timer_period.to_le_bytes())?;
+        writer.write_all(&self.timer_counter.to_le_bytes())?;
+        writer.write_all(&[self.output_level])?;
+        writer.write_all(&[self.sample_addr, self.sample_length])?;
+        writer.write_all(&self.current_addr.to_le_bytes())?;
+        writer.write_all(&self.bytes_remaining.to_le_bytes())?;
+        let sample_buffer = self.sample_buffer.unwrap_or(0);
+        writer.write_all(&[sample_buffer])?;
+        writer.write_all(&[self.shift_register])?;
+        writer.write_all(&[self.bits_remaining])?;
+        writer.write_all(&[self.silence as u8])?;
+        writer.write_all(&[self.dma_pending as u8])?;
+        writer.write_all(&[self.dma_delay])?;
+        Ok(())
+    }
+
+    pub fn load_state(&mut self, reader: &mut impl std::io::Read) -> std::io::Result<()> {
+        let mut flags = [0u8; 1];
+        reader.read_exact(&mut flags)?;
+        self.enabled = (flags[0] & 0x01) != 0;
+        self.irq_enabled = (flags[0] & 0x02) != 0;
+        self.irq_flag = (flags[0] & 0x04) != 0;
+        self.loop_flag = (flags[0] & 0x08) != 0;
+
+        let mut rate_buf = [0u8; 1];
+        reader.read_exact(&mut rate_buf)?;
+        self.rate_index = rate_buf[0];
+
+        let mut buf16 = [0u8; 2];
+        reader.read_exact(&mut buf16)?;
+        self.timer_period = u16::from_le_bytes(buf16);
+        reader.read_exact(&mut buf16)?;
+        self.timer_counter = u16::from_le_bytes(buf16);
+
+        let mut out_buf = [0u8; 1];
+        reader.read_exact(&mut out_buf)?;
+        self.output_level = out_buf[0];
+
+        let mut sample_buf = [0u8; 2];
+        reader.read_exact(&mut sample_buf)?;
+        self.sample_addr = sample_buf[0];
+        self.sample_length = sample_buf[1];
+
+        reader.read_exact(&mut buf16)?;
+        self.current_addr = u16::from_le_bytes(buf16);
+        reader.read_exact(&mut buf16)?;
+        self.bytes_remaining = u16::from_le_bytes(buf16);
+
+        let mut sample_buffer = [0u8; 1];
+        reader.read_exact(&mut sample_buffer)?;
+        self.sample_buffer = if sample_buffer[0] == 0 {
+            None
+        } else {
+            Some(sample_buffer[0])
+        };
+
+        let mut shift_buf = [0u8; 1];
+        reader.read_exact(&mut shift_buf)?;
+        self.shift_register = shift_buf[0];
+
+        let mut bits_buf = [0u8; 1];
+        reader.read_exact(&mut bits_buf)?;
+        self.bits_remaining = bits_buf[0];
+
+        let mut silence_buf = [0u8; 1];
+        reader.read_exact(&mut silence_buf)?;
+        self.silence = silence_buf[0] != 0;
+
+        let mut dma_buf = [0u8; 1];
+        reader.read_exact(&mut dma_buf)?;
+        self.dma_pending = dma_buf[0] != 0;
+
+        let mut delay_buf = [0u8; 1];
+        reader.read_exact(&mut delay_buf)?;
+        self.dma_delay = delay_buf[0];
+
+        Ok(())
     }
 }
