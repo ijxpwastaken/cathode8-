@@ -1,4 +1,6 @@
 # Cathode-8 (v5 accuracy core)
+<img width="2560" height="1440" alt="image" src="https://github.com/user-attachments/assets/976b663d-782b-4eb4-b8fb-c51e5e01b580" />
+
 <img width="1026" height="752" alt="image" src="https://github.com/user-attachments/assets/8686a239-a26f-4662-9026-8a1906bcd146" />
 
 
