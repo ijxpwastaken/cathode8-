@@ -468,6 +468,31 @@ impl Ppu {
         }
     }
 
+    fn approximate_mmc3_sprite_fetch_a12(&mut self, mapper: &mut dyn Mapper) {
+        if !mapper.suppress_a12_on_sprite_eval_reads() {
+            return;
+        }
+
+        let sprite_table_high = (self.ctrl & CTRL_SPRITE_TABLE) != 0;
+        let bg_table_high = (self.ctrl & CTRL_BG_TABLE) != 0;
+        if sprite_table_high == bg_table_high {
+            return;
+        }
+
+        // MMC3's A12 filter expects a sustained low period between rising edges.
+        // The software sprite path does not model cycles 257-320 fetch-by-fetch,
+        // so synthesize that low window explicitly.
+        for _ in 0..8 {
+            mapper.notify_ppu_read_addr(0x0000);
+        }
+
+        // When sprites use the high pattern table and background uses the low
+        // table, the sprite fetch phase contributes the rising edge directly.
+        if sprite_table_high {
+            mapper.notify_ppu_read_addr(0x1000);
+        }
+    }
+
     pub fn tick(&mut self, mapper: &mut dyn Mapper) {
         self.debug.ticks = self.debug.ticks.wrapping_add(1);
         self.allow_relaxed_sprite0_hit = mapper.allow_relaxed_sprite0_hit();
@@ -596,17 +621,10 @@ impl Ppu {
             }
         }
 
-        if visible_line
-            && rendering_enabled
-            && self.cycle == 260
-            && mapper.suppress_a12_on_sprite_eval_reads()
-            && (self.ctrl & CTRL_SPRITE_TABLE) != 0
-            && (self.ctrl & CTRL_BG_TABLE) == 0
-        {
+        if visible_line && rendering_enabled && self.cycle == 260 {
             // MMC3 IRQ timing approximation for renderers that do not run the
             // 257-320 sprite fetch pipeline cycle-by-cycle.
-            mapper.notify_ppu_read_addr(0x0000);
-            mapper.notify_ppu_read_addr(0x1000);
+            self.approximate_mmc3_sprite_fetch_a12(mapper);
         }
 
         // NTSC odd-frame cycle skip: pre-render line drops one PPU cycle when rendering is on.

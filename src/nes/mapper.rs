@@ -3020,6 +3020,7 @@ impl Mapper for Mapper85 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nes::ppu::Ppu;
 
     fn patterned_banks(total_size: usize, bank_size: usize) -> Vec<u8> {
         let mut data = vec![0u8; total_size];
@@ -3047,6 +3048,22 @@ mod tests {
             chr_is_ram,
             prg_ram_size: 8 * 1024,
         }
+    }
+
+    fn run_mmc3_irq_approximation_cycle(ctrl: u8) -> u64 {
+        let prg = patterned_banks(4 * 0x2000, 0x2000);
+        let chr = patterned_banks(8 * 0x0400, 0x0400);
+        let mut mapper = Mapper4::new(make_cart(4, 0, prg, chr, false));
+        let mut ppu = Ppu::new();
+
+        ppu.cpu_write_register(0x2000, ctrl, &mut mapper);
+        ppu.cpu_write_register(0x2001, 0x18, &mut mapper);
+
+        for _ in 0..700 {
+            ppu.tick(&mut mapper);
+        }
+
+        mapper.debug_irq_clocks
     }
 
     #[test]
@@ -3102,6 +3119,17 @@ mod tests {
         }
         mapper.notify_ppu_read_addr(0x1000);
         assert!(mapper.irq_pending());
+    }
+
+    #[test]
+    fn mapper4_ppu_irq_approximation_supports_both_table_polarities() {
+        // BG=$0000, sprites=$1000.
+        let sprite_high_clocks = run_mmc3_irq_approximation_cycle(0x08);
+        assert!(sprite_high_clocks > 0);
+
+        // BG=$1000, sprites=$0000.
+        let bg_high_clocks = run_mmc3_irq_approximation_cycle(0x10);
+        assert!(bg_high_clocks > 0);
     }
 
     #[test]
