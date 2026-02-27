@@ -1,116 +1,125 @@
-# Cathode-8 (v5 accuracy core)
-<img width="1261" height="688" alt="image" src="https://github.com/user-attachments/assets/a5a8011a-787f-4d45-b5c8-69ef3a003f1f" />
-This project is a technical implementation focused on high-fidelity hardware emulation and architectural research.
-Clean-Room Development: This repository contains no copyrighted commercial ROMs or proprietary assets.
-Verification-First: We exclusively use open-source test suites, such as AccuracyCoin and other public-domain hardware verification tools, to ensure cycle-accurate performance and stability.
-Policy on Piracy: We do not facilitate, encourage, or host the distribution of copyrighted game data. This project is intended for developers, researchers, and users who own their original hardware and software.
+# Cathode-8
+<img width="1261" height="688" alt="Cathode-8 emulator window" src="https://github.com/user-attachments/assets/a5a8011a-787f-4d45-b5c8-69ef3a003f1f" />
 
+Cathode-8 is a from-scratch NES emulator in Rust with a native desktop UI (`eframe/egui`) and an accuracy-focused emulation core.
 
+## What This Project Focuses On
+- Accuracy-first behavior for CPU/PPU/APU timing paths.
+- Mapper support across documented NES 2.0 mapper IDs `0..=559`.
+- Practical tooling for stress and regression checks.
+- Clean-room implementation with no proprietary Nintendo code or bundled ROMs.
 
-A from-scratch NES emulator written in Rust with a native desktop UI.
+## Quick Start
 
-> [!IMPORTANT]
-> **Legal Disclaimer & Anti-Piracy Policy**
-> This project is for educational and research purposes only.
-> 1. No Piracy
-> This emulator does NOT facilitate, encourage, or condone the use of illegal software.
-> DO NOT ask for ROMs or where to find them.
-> DO NOT use this software to play games you do not legally own.
-> We strongly advocate for the preservation of physical media. To use this emulator, you should buy a legitimate NES console and use a hardware dumper (such as INL-retro or CopyNES) to create a private backup of your own cartridges.
-> 2. Intellectual Property
-> No Proprietary Code: This software contains zero Nintendo code, BIOS files, or copyrighted assets. It is a 100% original implementation based on public hardware documentation found at the NESDev Wiki.
-> Trademarks: "NES" and "Nintendo Entertainment System" are trademarks of Nintendo Co., Ltd. This project is in no way affiliated with, authorized, or endorsed by Nintendo.
-> 3. Fair Use
-> This project falls under fair use for the purposes of interoperability and hardware research, as established in Sony Computer Entertainment, Inc. v. Connectix Corp.
-## Peformance
-Performance Benchmarks:
-Frame Timing: Consistently achieves ~13ms per frame on complex titles like Super Mario Bros. 3 (USA Rev 1), maintaining a ~22% performance headroom below the 16.67ms NTSC threshold.
-Efficiency: High-efficiency MMC3 interrupt handling ensures stable 60 FPS without frame-drops or audio desync, even during complex scanline-heavy scenes.
+### Prerequisites
+- Rust toolchain (stable)
+- A desktop environment with audio output support
 
-## Features
-
-- NES ROM loading (`.nes`) via:
-  - Open file dialog
-  - Drag and drop into the app window
-- CPU: 6502-compatible core with major official opcode coverage
-- PPU: timing-driven rendering pipeline (scroll registers, shifters, odd-frame skip, sprite evaluation)
-- Mapper support:
-  - Mapper 0 (NROM)
-  - Mapper 1 (MMC1)
-  - Mapper 2 (UxROM)
-  - Mapper 3 (CNROM)
-  - Mapper 4 (MMC3)
-  - Mapper 9 (MMC2, Punch-Out class boards)
-  - Mapper 66 (GxROM)
-  - Mapper 71 (Camerica/Codemasters, Bee 52 class boards)
-- MMC3 IRQ clocking from PPU A12 transitions (accuracy-focused behavior)
-- Port 2 Zapper support (mouse aim + trigger) for light-gun titles
-- Controller input mapping from keyboard
-- Real-time APU audio output with low-latency desktop playback
-- Dark-mode native UI
-
-## Run
-
+### Build
 ```bash
-cargo run
+cargo build
 ```
+
+### Run the GUI
+```bash
+cargo run --release
+```
+
+Then load a ROM by:
+- Clicking `Open ROM`
+- Pressing `Ctrl+O`
+- Dragging a `.nes` file into the window
 
 ## Controls
 
-- D-Pad: Arrow keys or `WASD`
-- A: `Z`
-- B: `X`
-- Start: `Enter`
-- Select: `Shift`
-- Pause/Run: `P`
-- Reset: `R`
-- Open ROM: `Ctrl+O`
-- Zapper aim: mouse cursor over game image
-- Zapper trigger: hold left mouse button
+| Action | Input |
+|---|---|
+| D-Pad | `WASD` or Arrow keys |
+| A | `Space` or `Z` |
+| B | `X` |
+| Start | `Enter` |
+| Select | `Shift` |
+| Pause/Resume | `P` |
+| Reset | `R` |
+| Open ROM | `Ctrl+O` |
+| Zapper Aim | Mouse over game image |
+| Zapper Trigger | Hold left mouse button |
 
-## Architecture
+## Mapper Support
 
-- `src/nes/cartridge.rs`:
-  - iNES/NES2 header parsing
-- `src/nes/mapper.rs`:
-  - Mapper trait + mapper implementations
-- `src/nes/cpu.rs`:
-  - 6502 CPU execution and instruction decode
-- `src/nes/ppu.rs`:
-  - PPU registers, timing loop, rendering
-- `src/app.rs`:
-  - Native GUI and drag-and-drop ROM loading
+### Explicit implementations
+- `0` (NROM)
+- `1` (MMC1)
+- `2` (UxROM)
+- `3` (CNROM)
+- `4` (MMC3)
+- `5` (MMC5)
+- `7` (AxROM)
+- `9` (MMC2)
+- `10` (MMC4)
+- `19` (Namco 163)
+- `24` (Konami VRC6a)
+- `25` (Konami VRC4b/d)
+- `26` (Konami VRC6b)
+- `66` (GxROM)
+- `69` (FME-7 / Sunsoft 5B)
+- `71` (Camerica)
+- `85` (Konami VRC7)
 
-## Notes
+### Generic fallback
+- Mapper IDs up to `559` fall back to a generic mapper path.
+- Mapper IDs above `559` are rejected by design.
 
-This build prioritizes accuracy over speed (v5 profile). True 100% compatibility still requires full APU emulation and additional mapper edge-case coverage.
+For broader compatibility notes, see [`COMPATIBILITY.md`](COMPATIBILITY.md).
 
-## Stress + Accuracy Runs
+## Development Commands
+```bash
+# Format
+cargo fmt
 
-Build the AccuracyCoin ROM from source:
+# Lints
+cargo clippy
 
-```powershell
-Set-Location external/AccuracyCoinRef
-.\nesasm.exe AccuracyCoin.asm
-Set-Location ..\..
+# Unit tests
+cargo test
 ```
 
-Run a 500-iteration emulator stress test:
+## Utility Binaries
 
-```powershell
-cargo run --release --bin stress_runner -- --rom external/AccuracyCoinRef/AccuracyCoin.nes --iterations 500 --frames 1800
+### Stress runner
+```bash
+cargo run --release --bin stress_runner -- --rom /path/to/rom.nes --iterations 500 --frames 1800
 ```
 
-Run extended AccuracyCoin probe passes:
-
-```powershell
-cargo run --release --bin accuracycoin_probe -- --rom external/AccuracyCoinRef/AccuracyCoin.nes --frames 4800
-cargo run --release --bin accuracycoin_probe -- --rom external/AccuracyCoinRef/AccuracyCoin.nes --frames 7200 --hold-input-frames 120 --input start
-cargo run --release --bin accuracycoin_probe -- --rom external/AccuracyCoinRef/AccuracyCoin.nes --frames 7200 --hold-input-frames 180 --input down,buttona
+### AccuracyCoin probe
+```bash
+cargo run --release --bin accuracycoin_probe -- --rom /path/to/AccuracyCoin.nes --frames 4800
 ```
 
-## Hardware References Used
+### ROM suite runner
+```bash
+cargo run --release --bin rom_test_runner -- --suite external/nes-test-roms/test_roms.xml --rom-root external/nes-test-roms
+```
 
-- NESDev Wiki
-- NES CPU/PPU memory map documentation
-- iNES mapper and cartridge format references
+### CLI debugger
+```bash
+cargo run --release --bin cathode8_debug -- /path/to/rom.nes
+```
+
+## Project Layout
+- `src/nes/`: emulation core (CPU, PPU, APU, mappers, cartridge parsing)
+- `src/app.rs`: desktop UI and input handling
+- `src/bin/`: utility binaries (`stress_runner`, `accuracycoin_probe`, `rom_test_runner`, `cathode8_debug`)
+
+## Legal
+- This repository does not include commercial ROMs or copyrighted Nintendo assets.
+- Use only ROM dumps from cartridges you legally own.
+- "NES" and "Nintendo Entertainment System" are trademarks of Nintendo Co., Ltd.
+- This project is unaffiliated with and not endorsed by Nintendo.
+
+## References
+- NESDev Wiki: https://www.nesdev.org/wiki/
+- NESDev Forums: https://forums.nesdev.org/
+
+## License
+MIT. See [`LICENSE`](LICENSE).
