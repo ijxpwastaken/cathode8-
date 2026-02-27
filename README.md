@@ -1,5 +1,9 @@
 # Cathode-8 (v5 accuracy core)
 <img width="1261" height="688" alt="image" src="https://github.com/user-attachments/assets/a5a8011a-787f-4d45-b5c8-69ef3a003f1f" />
+This project is a technical implementation focused on high-fidelity hardware emulation and architectural research.
+Clean-Room Development: This repository contains no copyrighted commercial ROMs or proprietary assets.
+Verification-First: We exclusively use open-source test suites, such as AccuracyCoin and other public-domain hardware verification tools, to ensure cycle-accurate performance and stability.
+Policy on Piracy: We do not facilitate, encourage, or host the distribution of copyrighted game data. This project is intended for developers, researchers, and users who own their original hardware and software.
 
 
 
